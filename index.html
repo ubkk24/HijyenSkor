@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hijyen Skoru</title>
+<link rel="manifest" href="manifest.json">
+<style>
+body{margin:0;font-family:Arial;background:#0f1720;color:white;text-align:center;padding-top:20px}
+#scoreCircle{width:220px;height:220px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:20px auto;font-size:42px;background:radial-gradient(circle,#00ffcc,#006655);transition:.3s}
+button{padding:10px 16px;margin:6px;border:none;border-radius:8px;background:#1f2937;color:white;cursor:pointer}
+#log{margin-top:20px;width:90%;max-width:500px;height:200px;overflow:auto;background:#071220;padding:10px;border-radius:8px;text-align:left;font-size:13px;margin-left:auto;margin-right:auto;}
+.pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#081421;margin:4px;font-size:13px}
+</style>
+</head>
+<body>
+
+<h2>📱 Hijyen Skoru</h2>
+
+<div id="scoreCircle">--</div>
+<div id="scoreText">-- / 100</div>
+<div id="confText">Tahmin güveni: --</div>
+<div id="statusText">Durum bekleniyor...</div>
+
+<div style="margin-top:20px">
+  <button id="btnClean">Temizledim ✅</button>
+  <button id="btnSimulateLow">Simülasyon: Cep</button>
+  <button id="btnSimulateHigh">Simülasyon: Elde</button>
+  <button id="btnSnapshot">Snapshot</button>
+</div>
+
+<div style="margin-top:14px">
+  <span class="pill" id="locLabel">Konum: -</span>
+  <span class="pill" id="luxLabel">Işık: -</span>
+  <span class="pill" id="motionLabel">Hareket: -</span>
+</div>
+
+<div id="log"></div>
+
+<script>
+const weights={kr:30,kb:25,tk:20,zt:15,ot:10};
+let components={kr:70,kb:100,tk:90,zt:100,ot:90};
+let lastClean=Date.now();
+let lastLux=50;
+let lastMotion=1;
+
+function log(m){logEl.innerHTML=`• ${new Date().toLocaleTimeString()} → ${m}<br>`+logEl.innerHTML;}
+const logEl=document.getElementById("log");
+
+function computeRaw(c){
+  return (c.kr*weights.kr+c.kb*weights.kb+c.tk*weights.tk+c.zt*weights.zt+c.ot*weights.ot)/100;
+}
+function computeConfidence(c){
+  const vals=[c.kr,c.kb,c.tk,c.zt,c.ot];
+  const m=vals.reduce((a,b)=>a+b)/vals.length;
+  const v=vals.map(x=>(x-m)**2).reduce((a,b)=>a+b)/vals.length;
+  return Math.max(0.05,Math.min(1,1-(v/10000)*4));
+}
+function updateUI(){
+  const score=Math.round(computeRaw(components));
+  const conf=computeConfidence(components);
+  document.getElementById("scoreText").textContent=`${score} / 100`;
+  document.getElementById("confText").textContent=`Tahmin güveni: ${(conf*100).toFixed(0)}%`;
+  const s=document.getElementById("statusText");
+  const c=document.getElementById("scoreCircle");
+
+  if(score>=75){c.style.background="radial-gradient(circle,#00ffcc,#006655)";s.textContent="✅ Düşük Risk";}
+  else if(score>=50){c.style.background="radial-gradient(circle,#ffc400,#b37a00)";s.textContent="⚠️ Orta Risk";}
+  else{c.style.background="radial-gradient(circle,#ff4b4b,#8a0000)";s.textContent="❗ Yüksek Risk";}
+
+  c.textContent = score;
+}
+
+function updateZT(){
+  const h=(Date.now()-lastClean)/3600000;
+  components.zt=h<1?100:h<6?85:h<12?60:h<24?40:h<72?20:10;
+}
+
+function applyLight(lux){
+  lastLux=lux;
+  document.getElementById("luxLabel").textContent=`Işık: ${lux}`;
+  if(lux<5) components.tk=Math.min(100,components.tk+2);
+  else if(lux<50) components.tk=Math.max(0,components.tk-1);
+  else components.tk=Math.max(0,components.tk-3);
+  updateUI();
+}
+
+function startLight(){
+  if("AmbientLightSensor" in window){
+    const s=new AmbientLightSensor();
+    s.onreading=()=>applyLight(s.illuminance);
+    s.start();
+  }
+}
+
+function startMotion(){
+  if(window.DeviceMotionEvent){
+    window.addEventListener("devicemotion",(e)=>{
+      const ax=e.accelerationIncludingGravity.x||0;
+      const ay=e.accelerationIncludingGravity.y||0;
+      const az=e.accelerationIncludingGravity.z||0;
+      const m=Math.sqrt(ax*ax+ay*ay+az*az);
+      lastMotion=m;
+      document.getElementById("motionLabel").textContent = m<1?"Hareket: Sabit":"Hareket: Aktif";
+
+      // MASAYA KOYMA TESPİTİ (m < 0.4 ve düşük ışık)
+      if(m<0.4 && lastLux<20){
+        components.tk = Math.max(0,components.tk-3);
+        log("Masaya koyma (risk++)");
+      }
+
+      if(m<1.2) components.ot=Math.max(0,components.ot-1);
+      else components.ot=Math.min(100,components.ot+1);
+
+      updateUI();
+    });
+  }
+}
+
+navigator.geolocation?.getCurrentPosition(()=>{components.kr=75;document.getElementById("locLabel").textContent="Konum: Açık Alan";updateUI();});
+
+document.getElementById("btnClean").onclick=()=>{lastClean=Date.now();components.zt=100;log("Temizlendi ✅");updateUI();}
+document.getElementById("btnSimulateLow").onclick=()=>{components.tk+=5;log("Simülasyon: Cep");updateUI();}
+document.getElementById("btnSimulateHigh").onclick=()=>{components.tk-=5;log("Simülasyon: Elde");updateUI();}
+document.getElementById("btnSnapshot").onclick=()=>{updateZT();log("Snapshot");updateUI();}
+
+updateUI();
+startLight();
+startMotion();
+setInterval(()=>{updateZT();updateUI();},5000);
+</script>
+
+</body>
+</html>
