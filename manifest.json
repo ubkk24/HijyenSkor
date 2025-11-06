@@ -1,0 +1,8 @@
+{
+  "name": "Hijyen Skor",
+  "short_name": "HijyenSkor",
+  "display": "standalone",
+  "start_url": ".",
+  "theme_color": "#006655",
+  "background_color": "#0f1720"
+}
